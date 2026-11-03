@@ -20,7 +20,7 @@
     ? GameGlobal
     : (typeof globalThis !== 'undefined' ? globalThis : this);
 
-  var VERSION = '0.2.0';
+  var VERSION = '0.2.1';
   var DEFAULT_GLOBAL_PREFIX = '__bevy_douyin_';
   var installed = null;
 

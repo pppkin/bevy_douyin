@@ -26,7 +26,7 @@ RUNTIME_DIR="$SCRIPT_DIR/../runtime"
 need() {
   command -v "$1" >/dev/null 2>&1 || {
     echo "missing required command: $1" >&2
-    echo "see README.md > 快速开始 > 前置工具" >&2
+    echo "see README.md#requirements" >&2
     exit 1
   }
 }
