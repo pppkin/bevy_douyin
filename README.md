@@ -42,8 +42,6 @@ git add addons/bevy-douyin
 git commit -m "chore: pin bevy-douyin adapter v0.2.1"
 ```
 
-If the Gitee repository is private, use your SSH remote or request access first.
-
 ### 2. Copy the package template
 
 ```bash
