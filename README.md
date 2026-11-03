@@ -16,6 +16,9 @@ runtime/
 tools/
   build.sh          cargo + wasm-bindgen + wasm-opt + brotli + glue patch
   patch_glue.py     patches wasm-bindgen 0.2.129 for the Douyin runtime
+template/
+  package/          game.js / game.json / project.config.json starter files
+  README.md         host integration notes
 ```
 
 ## Use as a submodule
@@ -59,6 +62,24 @@ assets/
 The build script does **not** generate `game.js` / `game.json` /
 `project.config.json`; those are game-specific and stay in the consuming
 repository.
+
+## Runtime → Rust globals
+
+`adapter.install()` publishes host facts on both `GameGlobal` and `window`
+under `globalPrefix` (default `__bevy_douyin_`):
+
+| Name | Direction | Meaning |
+| --- | --- | --- |
+| `<prefix>Canvas` | JS → Rust | logical canvas size `{ width, height }` |
+| `<prefix>SafeArea` | JS → Rust | insets, screen size, menu button |
+| `<prefix>Theme` | both | `"dark"` / `"light"` |
+| `<prefix>SetTheme` | Rust → JS | manual appearance override |
+| `<prefix>AdStatus` | JS → Rust | rewarded-video state |
+| `<prefix>ShowAd` | Rust → JS | start a rewarded video |
+
+The game's Rust `Host` implementation owns the SDK calls; the adapter only
+bridges them to Douyin `tt.*` APIs. If a game overrides `globalPrefix`, its
+host constants must match.
 
 ## Requirements
 

@@ -20,7 +20,8 @@
     ? GameGlobal
     : (typeof globalThis !== 'undefined' ? globalThis : this);
 
-  var VERSION = '0.1.0';
+  var VERSION = '0.2.0';
+  var DEFAULT_GLOBAL_PREFIX = '__bevy_douyin_';
   var installed = null;
 
   function describeError(e) {
@@ -32,6 +33,18 @@
     if (installed) return installed;
 
     var cfg = options || {};
+    var globalPrefix = cfg.globalPrefix ? String(cfg.globalPrefix) : DEFAULT_GLOBAL_PREFIX;
+
+    // Publish host facts under a configurable namespace.  The Rust host reads
+    // these names back through `window` (and GameGlobal is kept in sync for
+    // device harnesses).  Games that embed more than one runtime can override
+    // `globalPrefix` instead of colliding on process-wide globals.
+    function publish(name, value) {
+      var key = globalPrefix + name;
+      try { G[key] = value; } catch (e) {}
+      try { if (typeof win !== 'undefined') win[key] = value; } catch (e) {}
+    }
+
     var canvasSelector = cfg.canvas || '#bevy-canvas';
     var devicePixelRatio = Number(cfg.devicePixelRatio) || 1;
 
@@ -90,8 +103,7 @@
       return null;
     }
     function publishTheme() {
-      try { G.__goldfrontTheme = currentTheme; } catch (e) {}
-      try { if (typeof win !== 'undefined') win.__goldfrontTheme = currentTheme; } catch (e) {}
+      publish('Theme', currentTheme);
     }
     function setTheme(value) {
       var next = String(value || '').toLowerCase() === 'light' ? 'light' : 'dark';
@@ -151,10 +163,10 @@
     } catch (e) {
       log('device info unavailable: ' + e);
     }
-    try { G.__goldfrontSafeArea = safeArea; } catch (e) {}
+    publish('SafeArea', safeArea);
     // Canvas size in design pixels; the Rust side creates its window with
     // exactly these dimensions (see `safe_area::design_viewport`).
-    try { G.__goldfrontCanvas = { width: W, height: H }; } catch (e) {}
+    publish('Canvas', { width: W, height: H });
 
     if (typeof tt === 'undefined' || typeof tt.createCanvas !== 'function') {
       throw new Error(prefix + ' tt.createCanvas is unavailable: not a Douyin mini-game?');
@@ -806,11 +818,11 @@
     win.window = win;
     win.parent = win;
     win.top = win;
-    win.__goldfrontSafeArea = safeArea;
+    publish('SafeArea', safeArea);
     // Rust reads the canvas size back through `window` (the shim above), not
     // through GameGlobal, so publish it on both.
-    win.__goldfrontCanvas = { width: W, height: H };
-    win.__goldfrontTheme = currentTheme;
+    publish('Canvas', { width: W, height: H });
+    publish('Theme', currentTheme);
     log('theme: ' + currentTheme);
     try {
       if (typeof tt.onThemeChange === 'function') {
@@ -820,11 +832,11 @@
         });
       }
     } catch (e) {}
-    win.__goldfrontSetTheme = function (value) {
+    publish('SetTheme', function (value) {
       var next = String(value || '').toLowerCase() === 'light' ? 'light' : 'dark';
       manualTheme = next;
       setTheme(next);
-    };
+    });
 
     // ── rewarded video ads ────────────────────────────────────────────────
     // A single rewarded-video unit can serve all three reward placements.
@@ -837,7 +849,7 @@
       return cfg.adUnitId ? String(cfg.adUnitId) : '';
     }
     function publishAdStatus(status) {
-      try { win.__goldfrontAdStatus = status; } catch (e) {}
+      publish('AdStatus', status);
     }
     publishAdStatus('idle');
     function getRewardedVideo(kind) {
@@ -865,7 +877,7 @@
       });
       return ad;
     }
-    win.__goldfrontShowAd = function (kind) {
+    publish('ShowAd', function (kind) {
       var ad = getRewardedVideo(kind);
       if (!ad) {
         publishAdStatus('unavailable');
@@ -896,7 +908,7 @@
         });
       }
       return true;
-    };
+    });
 
     if (nativeSetInterval) {
       nativeSetInterval(function () {
@@ -1364,6 +1376,7 @@
       version: VERSION,
       config: cfg,
       global: G,
+      globalPrefix: globalPrefix,
       canvas: canvas,
       realCanvas: realCanvas,
       document: doc,

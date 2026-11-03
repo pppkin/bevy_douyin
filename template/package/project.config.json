@@ -1,0 +1,8 @@
+{
+  "appid": "tt0000000000000000",
+  "projectname": "my-game",
+  "douyinProjectType": "native",
+  "setting": {
+    "es6": true
+  }
+}
