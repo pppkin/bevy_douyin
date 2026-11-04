@@ -20,7 +20,7 @@
     ? GameGlobal
     : (typeof globalThis !== 'undefined' ? globalThis : this);
 
-  var VERSION = '0.2.2';
+  var VERSION = '0.3.0';
   var DEFAULT_GLOBAL_PREFIX = '__bevy_douyin_';
   var installed = null;
 
@@ -47,47 +47,93 @@
 
     var canvasSelector = cfg.canvas || '#bevy-canvas';
     var devicePixelRatio = Number(cfg.devicePixelRatio) || 1;
+    var storagePrefix = cfg.storagePrefix != null ? String(cfg.storagePrefix) : '';
+    var adTimeoutMs = Number(cfg.adTimeoutMs);
+    if (!(adTimeoutMs > 0)) adTimeoutMs = 30000;
 
     var sysInfo = {};
-    try { sysInfo = tt.getSystemInfoSync() || {}; } catch (e) {}
     var designW = Number(cfg.width) || 1280;
     var designH = Number(cfg.height) || 1280;
-    var screenW = Number(cfg.screenWidth) || Number(sysInfo.windowWidth) || designW;
-    var screenH = Number(cfg.screenHeight) || Number(sysInfo.windowHeight) || designH;
-    // The canvas must share the screen's aspect ratio: the host scales the
-    // main canvas to fill the screen, so a fixed 720x1280 buffer would be
-    // stretched (and the Rust camera would have to letterbox or distort).
-    // Tall phones keep the design width and gain height; wide screens
-    // (tablets, split view) keep the design height and gain width.
-    var W = Math.round(Math.max(designW, designH * screenW / screenH));
-    var H = Math.round(Math.max(designH, designW * screenH / screenW));
+    var screenW = designW;
+    var screenH = designH;
+    var W = designW;
+    var H = designH;
+    var safeArea = null;
+    var menuButton = null;
 
-    // Safe-area rectangle, in CSS pixels. Douyin exposes status-bar and
-    // home-indicator bounds through getSystemInfoSync().safeArea. If a host
-    // does not provide them, use a conservative phone-shaped default.
     function finite(value, fallback) {
       return typeof value === 'number' && isFinite(value) ? value : fallback;
     }
-    var safeInfo = sysInfo.safeArea || {};
-    var safeLeft = finite(safeInfo.left, screenW * 0.02);
-    var safeTop = finite(safeInfo.top, screenH * 0.045);
-    var safeRight = finite(safeInfo.right, screenW * 0.98);
-    var safeBottom = finite(safeInfo.bottom, screenH * 0.965);
-    var menuButton = null;
-    try {
-      if (typeof tt.getMenuButtonBoundingClientRect === 'function') {
-        menuButton = tt.getMenuButtonBoundingClientRect();
-      }
-    } catch (e) {}
-    var safeArea = {
-      left: Math.max(0, Math.min(safeLeft, screenW * 0.12)),
-      top: Math.max(0, Math.min(safeTop, screenH * 0.18)),
-      right: Math.max(0, Math.min(screenW - safeRight, screenW * 0.12)),
-      bottom: Math.max(0, Math.min(screenH - safeBottom, screenH * 0.18)),
-      screenWidth: screenW,
-      screenHeight: screenH,
-      menuButton: menuButton
-    };
+
+    // The menu capsule is reported in CSS pixels, relative to the screen.
+    // Normalise it so consumers can always read the same five fields, and
+    // keep `null` when the host does not expose it (older base libraries).
+    function readMenuButton() {
+      var r = null;
+      try {
+        if (typeof tt.getMenuButtonBoundingClientRect === 'function') {
+          r = tt.getMenuButtonBoundingClientRect();
+        }
+      } catch (e) {}
+      if (!r) return null;
+      var left = finite(r.left, 0);
+      var top = finite(r.top, 0);
+      var right = finite(r.right, left + finite(r.width, 0));
+      var bottom = finite(r.bottom, top + finite(r.height, 0));
+      return {
+        left: left,
+        top: top,
+        right: right,
+        bottom: bottom,
+        width: Math.max(0, finite(r.width, right - left)),
+        height: Math.max(0, finite(r.height, bottom - top))
+      };
+    }
+
+    // Recompute everything that depends on the screen: canvas size, safe
+    // area, menu capsule. Called once at install and again on host resize.
+    function computeViewport() {
+      try { sysInfo = tt.getSystemInfoSync() || {}; } catch (e) { sysInfo = {}; }
+      screenW = Number(cfg.screenWidth) || Number(sysInfo.windowWidth) || designW;
+      screenH = Number(cfg.screenHeight) || Number(sysInfo.windowHeight) || designH;
+      // The canvas must share the screen's aspect ratio: the host scales the
+      // main canvas to fill the screen, so a fixed 720x1280 buffer would be
+      // stretched (and the Rust camera would have to letterbox or distort).
+      // Tall phones keep the design width and gain height; wide screens
+      // (tablets, split view) keep the design height and gain width.
+      W = Math.round(Math.max(designW, designH * screenW / screenH));
+      H = Math.round(Math.max(designH, designW * screenH / screenW));
+
+      // Safe-area rectangle, in CSS pixels. Douyin exposes status-bar and
+      // home-indicator bounds through getSystemInfoSync().safeArea. If a host
+      // does not provide them, use a conservative phone-shaped default.
+      var safeInfo = sysInfo.safeArea || {};
+      var safeLeft = finite(safeInfo.left, screenW * 0.02);
+      var safeTop = finite(safeInfo.top, screenH * 0.045);
+      var safeRight = finite(safeInfo.right, screenW * 0.98);
+      var safeBottom = finite(safeInfo.bottom, screenH * 0.965);
+      safeArea = {
+        // Insets, not absolute coordinates: how much of each edge is covered
+        // by the status bar / home indicator / notch.
+        left: Math.max(0, Math.min(safeLeft, screenW * 0.12)),
+        top: Math.max(0, Math.min(safeTop, screenH * 0.18)),
+        right: Math.max(0, Math.min(screenW - safeRight, screenW * 0.12)),
+        bottom: Math.max(0, Math.min(screenH - safeBottom, screenH * 0.18)),
+        screenWidth: screenW,
+        screenHeight: screenH,
+        width: 0,
+        height: 0,
+        statusBarHeight: Math.max(0, finite(sysInfo.statusBarHeight, 0)),
+        menuButton: null,
+        hasMenuButton: false
+      };
+      safeArea.width = Math.max(0, screenW - safeArea.left - safeArea.right);
+      safeArea.height = Math.max(0, screenH - safeArea.top - safeArea.bottom);
+      menuButton = readMenuButton();
+      safeArea.menuButton = menuButton;
+      safeArea.hasMenuButton = !!menuButton;
+    }
+    computeViewport();
 
     // Day/night appearance. Douyin reports the host appearance on the same
     // system-info object on current clients; older hosts simply fall back to
@@ -104,13 +150,16 @@
     }
     function publishTheme() {
       publish('Theme', currentTheme);
+      publish('ThemeManual', manualTheme != null);
+      publish('ThemeSource', manualTheme != null ? 'manual' : 'system');
     }
     function setTheme(value) {
       var next = String(value || '').toLowerCase() === 'light' ? 'light' : 'dark';
-      if (next === currentTheme) return;
+      if (next === currentTheme) return false;
       currentTheme = next;
       publishTheme();
       log('theme: ' + currentTheme);
+      return true;
     }
     currentTheme = systemTheme() || 'dark';
     publishTheme();
@@ -140,9 +189,12 @@
       }
       try { console.log(prefix + ' ' + text); } catch (e) {}
     }
+    var lastError = '';
     function fail(where, e) {
       var text = where + ': ' + describeError(e);
+      lastError = text;
       log('ERROR ' + text);
+      try { publish('LastError', text); } catch (_) {}
       try { console.error(prefix + ' ' + text); } catch (_) {}
     }
     // Device probes are opt-in: the harness sets `GameGlobal.__probe = 1`
@@ -608,35 +660,57 @@
     // in-memory map stays as a cache and as a fallback for browser preview.
     var storage = {
       _data: Object.create(null),
+      _owned: Object.create(null),
       _persist: false,
+      _full: function (k) { return storagePrefix + String(k); },
       _load: function () {
         var self = this;
         try {
           if (typeof tt !== 'undefined' && typeof tt.getStorageInfoSync === 'function') {
             var info = tt.getStorageInfoSync() || {};
-            (info.keys || []).forEach(function (k) {
-              var v = tt.getStorageSync(k);
+            (info.keys || []).forEach(function (full) {
+              if (storagePrefix && full.indexOf(storagePrefix) !== 0) return;
+              var k = storagePrefix ? full.slice(storagePrefix.length) : full;
+              var v = tt.getStorageSync(full);
               if (v !== '' && v != null) self._data[k] = String(v);
             });
             self._persist = typeof tt.setStorageSync === 'function';
           }
         } catch (e) { self._persist = false; }
       },
-      getItem: function (k) { return this._data[k] == null ? null : this._data[k]; },
+      getItem: function (k) {
+        k = String(k);
+        return this._data[k] == null ? null : this._data[k];
+      },
       setItem: function (k, v) {
+        k = String(k);
         this._data[k] = String(v);
-        if (this._persist) { try { tt.setStorageSync(k, this._data[k]); } catch (e) {} }
+        this._owned[k] = true;
+        if (this._persist) { try { tt.setStorageSync(this._full(k), this._data[k]); } catch (e) {} }
       },
       removeItem: function (k) {
+        k = String(k);
         delete this._data[k];
-        if (this._persist) { try { tt.removeStorageSync(k); } catch (e) {} }
+        delete this._owned[k];
+        if (this._persist) { try { tt.removeStorageSync(this._full(k)); } catch (e) {} }
       },
+      // Web Storage's clear() wipes the whole origin, which on Douyin would
+      // delete every mini-game's data plus the adapter boot log. When a
+      // storagePrefix is configured, clear only that namespace. Without one,
+      // clear only the keys this game wrote through this adapter, leaving
+      // keys that merely existed in host storage untouched.
       clear: function () {
+        var self = this;
         var keys = Object.keys(this._data);
-        this._data = Object.create(null);
-        if (this._persist) {
-          keys.forEach(function (k) { try { tt.removeStorageSync(k); } catch (e) {} });
-        }
+        keys.forEach(function (k) {
+          if (storagePrefix || self._owned[k]) {
+            delete self._data[k];
+            if (self._persist) {
+              try { tt.removeStorageSync(self._full(k)); } catch (e) {}
+            }
+          }
+        });
+        self._owned = Object.create(null);
       },
       key: function (i) { return Object.keys(this._data)[i] || null; },
       get length() { return Object.keys(this._data).length; }
@@ -673,6 +747,7 @@
     var nativeFetch = typeof G.fetch === 'function' ? G.fetch.bind(G) : null;
     var nativeSetInterval = typeof G.setInterval === 'function' ? G.setInterval.bind(G) : null;
     var nativeSetTimeout = typeof G.setTimeout === 'function' ? G.setTimeout.bind(G) : null;
+    var nativeClearTimeout = typeof G.clearTimeout === 'function' ? G.clearTimeout.bind(G) : null;
     // Frame instrumentation: a black screen with no logs is otherwise
     // indistinguishable between "no frame ran" and "frames run but draw
     // nothing".  Every callback is wrapped so that an exception inside the
@@ -819,25 +894,103 @@
     win.window = win;
     win.parent = win;
     win.top = win;
-    publish('SafeArea', safeArea);
-    // Rust reads the canvas size back through `window` (the shim above), not
-    // through GameGlobal, so publish it on both.
-    publish('Canvas', { width: W, height: H });
-    publish('Theme', currentTheme);
+    var viewportSeq = 0;
+    function publishViewport() {
+      viewportSeq += 1;
+      var canvasInfo = { width: W, height: H };
+      // Rust reads the canvas size back through `window` (the shim above), not
+      // through GameGlobal, so publish it on both.
+      publish('Canvas', canvasInfo);
+      publish('SafeArea', safeArea);
+      publish('ViewportSeq', viewportSeq);
+      publish('Layout', {
+        canvas: canvasInfo,
+        safeArea: safeArea,
+        screen: { width: screenW, height: screenH },
+        devicePixelRatio: devicePixelRatio,
+        seq: viewportSeq
+      });
+    }
+    function refreshViewport() {
+      var oldW = W;
+      var oldH = H;
+      computeViewport();
+      realCanvas.width = Math.round(W * devicePixelRatio);
+      realCanvas.height = Math.round(H * devicePixelRatio);
+      style.width = W + 'px';
+      style.height = H + 'px';
+      win.innerWidth = W;
+      win.innerHeight = H;
+      win.outerWidth = W;
+      win.outerHeight = H;
+      win.screen.width = screenW;
+      win.screen.height = screenH;
+      win.screen.availWidth = screenW;
+      win.screen.availHeight = screenH;
+      publishViewport();
+      log('viewport: ' + oldW + 'x' + oldH + ' -> ' + W + 'x' + H +
+        ' screen=' + screenW + 'x' + screenH + ' seq=' + viewportSeq);
+      var ev = { type: 'resize', target: win, currentTarget: win, timeStamp: perf.now() };
+      dispatchWin('resize', ev);
+    }
+    try {
+      if (typeof tt.onWindowResize === 'function') {
+        tt.onWindowResize(function () { refreshViewport(); });
+      }
+    } catch (e) {
+      fail('onWindowResize', e);
+    }
+
+    publishViewport();
+    publish('Version', VERSION);
+    publish('Config', {
+      name: cfg.name || '',
+      designWidth: designW,
+      designHeight: designH,
+      globalPrefix: globalPrefix,
+      storagePrefix: storagePrefix,
+      devicePixelRatio: devicePixelRatio,
+      adTimeoutMs: adTimeoutMs,
+      mockAds: cfg.mockAds !== false,
+      adUnitConfigured: !!cfg.adUnitId,
+      automaticResize: typeof tt.onWindowResize === 'function'
+    });
+    publish('LastError', lastError);
+
+    publishTheme();
     log('theme: ' + currentTheme);
     try {
       if (typeof tt.onThemeChange === 'function') {
         tt.onThemeChange(function (res) {
-          manualTheme = null;
+          // A manual choice wins until the game calls FollowTheme(); a system
+          // appearance change must not silently undo it.
+          if (manualTheme != null) return;
           setTheme(res && (res.theme || res.themeMode || res.colorScheme));
         });
       }
     } catch (e) {}
     publish('SetTheme', function (value) {
-      var next = String(value || '').toLowerCase() === 'light' ? 'light' : 'dark';
-      manualTheme = next;
-      setTheme(next);
+      manualTheme = String(value || '').toLowerCase() === 'light' ? 'light' : 'dark';
+      setTheme(manualTheme);
+      publishTheme();
+      log('theme: manual ' + manualTheme);
     });
+    publish('FollowTheme', function () {
+      manualTheme = null;
+      var next = systemTheme();
+      if (next) setTheme(next);
+      publishTheme();
+      log('theme: follow ' + currentTheme);
+    });
+
+    var appState = 'foreground';
+    var appStateSeq = 0;
+    function publishAppState() {
+      appStateSeq += 1;
+      publish('AppState', appState);
+      publish('AppStateSeq', appStateSeq);
+    }
+    publishAppState();
 
     // ── rewarded video ads ────────────────────────────────────────────────
     // A single rewarded-video unit can serve all three reward placements.
@@ -848,31 +1001,96 @@
     // `mockAds: false` to get `unavailable` instead.
     var rewardedAds = Object.create(null);
     var MOCK_AD_RESULTS = { ended: true, skipped: true, error: true };
+    var adTicket = 0;
+    var activeTicket = 0;
+    var activeTimer = null;
+    var activeMock = false;
+    var activeKind = '';
+    var adResult = null;
+
     function adUnitFor(kind) {
       if (cfg.adUnitIds && cfg.adUnitIds[kind]) return String(cfg.adUnitIds[kind]);
       return cfg.adUnitId ? String(cfg.adUnitId) : '';
     }
-    function publishAdStatus(status) {
+    function clearAdTimer() {
+      if (activeTimer == null) return;
+      if (nativeClearTimeout) {
+        try { nativeClearTimeout(activeTimer); } catch (e) {}
+      }
+      activeTimer = null;
+    }
+    function armAdTimer() {
+      if (!nativeSetTimeout) return;
+      activeTimer = nativeSetTimeout(function () {
+        activeTimer = null;
+        if (!activeTicket) return;
+        log('ad timeout ticket=' + activeTicket + ' after ' + adTimeoutMs + 'ms');
+        publishAdStatus('error', 'timeout');
+      }, adTimeoutMs);
+    }
+    function publishAdStatus(status, reason) {
       publish('AdStatus', status);
+      if (status === 'error') {
+        publish('AdLastError', reason || 'error');
+      }
+      if (reason) publish('AdReason', reason);
+      var terminal = status === 'ended' || status === 'skipped' ||
+        status === 'error' || status === 'unavailable';
+      if (!terminal) return;
+      if (activeTicket) {
+        adResult = {
+          ticket: activeTicket,
+          kind: activeKind,
+          status: status,
+          reason: reason || '',
+          isEnded: status === 'ended',
+          mock: activeMock
+        };
+        publish('AdResult', adResult);
+        log('ad result ticket=' + adResult.ticket + ' status=' + status +
+          (reason ? ' reason=' + reason : ''));
+      }
+      clearAdTimer();
+      activeTicket = 0;
+    }
+    function beginAd(kind, mock) {
+      adTicket += 1;
+      activeTicket = adTicket;
+      activeKind = kind;
+      activeMock = mock;
+      adResult = null;
+      publish('AdTicket', activeTicket);
+      publish('AdResult', null);
+      publish('AdMock', mock);
+      publish('AdLastError', '');
+      publish('AdReason', '');
+      armAdTimer();
+      publishAdStatus('loading');
+      return activeTicket;
     }
     publishAdStatus('idle');
     publish('AdMock', false);
+    publish('AdTicket', 0);
+    publish('AdResult', null);
+    publish('AdLastError', '');
+    publish('AdReason', '');
 
     function showMockAd(kind) {
-      publish('AdMock', true);
       var result = String(cfg.mockAdResult || 'ended').toLowerCase();
       if (!MOCK_AD_RESULTS[result]) result = 'ended';
       var delay = Number(cfg.mockAdDelay);
       if (!(delay >= 0)) delay = 600;
-      publishAdStatus('loading');
-      log('ad mock kind=' + kind + ' result=' + result + ' delay=' + delay + 'ms');
+      var ticket = beginAd(kind, true);
+      log('ad mock kind=' + kind + ' result=' + result + ' delay=' + delay +
+        'ms ticket=' + ticket);
       var finish = function () {
-        publishAdStatus(result);
+        if (activeTicket !== ticket) return;
+        publishAdStatus(result, 'mock');
         log('ad mock finished: ' + result);
       };
       if (nativeSetTimeout) nativeSetTimeout(finish, delay);
       else finish();
-      return true;
+      return ticket;
     }
     function getRewardedVideo(kind) {
       var unitId = adUnitFor(kind);
@@ -889,27 +1107,33 @@
       }
       rewardedAds[unitId] = ad;
       ad.onClose(function (res) {
+        if (!activeTicket) return;
         var ended = !!(res && res.isEnded);
-        publishAdStatus(ended ? 'ended' : 'skipped');
-        log('ad close ended=' + ended);
+        publishAdStatus(ended ? 'ended' : 'skipped', ended ? 'completed' : 'closed-early');
+        log('ad close ended=' + ended + ' ticket=' + activeTicket);
       });
       ad.onError(function (err) {
-        publishAdStatus('error');
+        if (!activeTicket) return;
+        publishAdStatus('error', 'runtime');
         log('ad error: ' + describeError(err));
       });
       return ad;
     }
-    publish('ShowAd', function (kind) {
+    function requestAd(kind) {
+      kind = kind || 'rewarded';
+      if (activeTicket) {
+        log('ad request ignored: ticket ' + activeTicket + ' still pending');
+        return 0;
+      }
       var unitId = adUnitFor(kind);
       var ad = getRewardedVideo(kind);
       if (!ad) {
         if (!unitId && cfg.mockAds !== false) return showMockAd(kind);
-        publishAdStatus(unitId ? 'error' : 'unavailable');
-        return false;
+        publishAdStatus(unitId ? 'error' : 'unavailable', unitId ? 'create-failed' : 'no-ad-unit');
+        return 0;
       }
-      publish('AdMock', false);
-      publishAdStatus('loading');
-      log('ad show kind=' + kind);
+      var ticket = beginAd(kind, false);
+      log('ad show kind=' + kind + ' ticket=' + ticket);
       var shown;
       try {
         shown = ad.show();
@@ -918,21 +1142,28 @@
       }
       if (shown && typeof shown.then === 'function') {
         shown.catch(function (err) {
+          if (activeTicket !== ticket) return;
           log('ad show failed, retrying after load: ' + describeError(err));
           try {
             ad.load().then(function () {
               return ad.show();
             }).catch(function (e2) {
-              publishAdStatus('error');
+              if (activeTicket !== ticket) return;
+              publishAdStatus('error', 'show-failed');
               log('ad load/show failed: ' + describeError(e2));
             });
           } catch (e2) {
-            publishAdStatus('error');
+            if (activeTicket !== ticket) return;
+            publishAdStatus('error', 'retry-failed');
             log('ad retry failed: ' + describeError(e2));
           }
         });
       }
-      return true;
+      return ticket;
+    }
+    publish('RequestAd', requestAd);
+    publish('ShowAd', function (kind) {
+      return requestAd(kind) > 0;
     });
 
     if (nativeSetInterval) {
@@ -1021,6 +1252,12 @@
       }
     }
     function setVisible(visible) {
+      var nextState = visible ? 'foreground' : 'background';
+      if (nextState !== appState) {
+        appState = nextState;
+        publishAppState();
+        log('lifecycle: ' + appState + ' seq=' + appStateSeq);
+      }
       doc.hidden = !visible;
       doc.visibilityState = visible ? 'visible' : 'hidden';
       dispatchDoc('visibilitychange', {

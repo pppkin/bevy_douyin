@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.3.0
+
+### Added
+
+- `Version`, `Config`, `Layout` and `ViewportSeq` globals. `Layout` bundles
+  canvas, safe area, screen size and device pixel ratio in one stable object.
+- Runtime viewport refresh on `tt.onWindowResize`: the adapter recomputes the
+  canvas/safe area, resizes the backing store, updates `window.innerWidth/Height`
+  and `screen`, republishes `Canvas`/`SafeArea`/`Layout`, bumps `ViewportSeq`
+  and dispatches `resize`.
+- `SafeArea` now exposes `width`, `height`, `statusBarHeight`, `hasMenuButton`
+  and a normalised `menuButton` (`{left,top,right,bottom,width,height}` or null).
+- `ThemeManual` and `ThemeSource`. `FollowTheme()` resumes system appearance;
+  `SetTheme()` now keeps the manual choice across system changes.
+- Ticket-based ads: `RequestAd(kind)` returns a ticket, and `AdResult`
+  (`{ticket,kind,status,reason,isEnded,mock}`) lets games correlate callbacks.
+  `ShowAd(kind)` remains as a boolean compatibility wrapper.
+- Adapter-side ad timeout (`adTimeoutMs`, default 30s) publishes
+  `status=error`, `reason=timeout`.
+- `AppState` / `AppStateSeq` for foreground/background transitions.
+- `storagePrefix` namespaces storage; `clear()` is scoped to that prefix (or,
+  without one, to keys written through the adapter). Foreign host keys and
+  `__boot_notes` are preserved.
+- `LastError`, `AdReason` and `AdLastError` for diagnostics.
+- Tests expanded to 19 cases covering the new viewport, theme, lifecycle,
+  ticket/timeout and storage-scoping behaviour.
+
+### Changed
+
+- `AdMock` now describes the current/last ad only; use `Config.mockAds` to
+  check whether the mock is enabled.
+- `SetTheme` no longer lets `tt.onThemeChange` silently clear the manual
+  override; call `FollowTheme()` explicitly.
+- Theme check interval is documented as 4s (the adapter already used 4s).
+
+### Fixed
+
+- `clear()` no longer wipes every key previously loaded from host storage.
+- A late mock-ad timer or an old real-ad callback can no longer overwrite a
+  newer ticket's result.
+- Occupied ad state now returns `0` from `RequestAd` instead of starting a
+  second request.
+
 ## 0.2.2
 
 ### Added

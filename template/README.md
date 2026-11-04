@@ -12,7 +12,7 @@ The files are:
 
 | File | What to change |
 | --- | --- |
-| `game.js` | `name`, `wasm`, `glue`, `AD_UNIT_ID`, optional `globalPrefix` |
+| `game.js` | `name`, `wasm`, `glue`, `AD_UNIT_ID`, optional `globalPrefix` / `storagePrefix` |
 | `game.json` | orientation / status bar, if your game needs different behavior |
 | `project.config.json` | `appid` and `projectname` |
 | `icon.png` | add your own icon; the template intentionally ships none |
@@ -26,10 +26,13 @@ The files are:
   (`target/wasm32-unknown-unknown/release/<stem>.wasm`); it does not rename
   the JavaScript output.
 - `AD_UNIT_ID` is your Douyin rewarded-video ad slot. Leave it empty to use the
-  adapter's local mock flow: `ShowAd` returns `true`, `AdStatus` goes
-  `loading → ended` after `mockAdDelay` (600ms). Use `mockAdResult`
-  (`ended` / `skipped` / `error`) to test the failure paths, or
-  `mockAds: false` to make an empty slot report `unavailable`.
+  adapter's local mock flow: `RequestAd` returns a ticket, `AdStatus` goes
+  `loading → ended` after `mockAdDelay` (600ms), and `AdResult` carries the
+  same ticket. Use `mockAdResult` (`ended` / `skipped` / `error`) to test the
+  failure paths, or `mockAds: false` to make an empty slot report
+  `unavailable`.
+- `storagePrefix` (optional, e.g. `'mygame.'`) namespaces `localStorage` and
+  scopes `clear()`; without it the adapter only clears keys it wrote itself.
 - `canvas` must match the selector the runtime should create (`#game-canvas`
   in this template); `width` / `height` are the logical resolution.
 - `globalPrefix` defaults to `__bevy_douyin_`. If you change it, update the
@@ -49,13 +52,17 @@ the game's own host contract. The adapter exposes these globals under
 
 | Global | Direction | Meaning |
 | --- | --- | --- |
-| `Canvas` | JS -> Rust | logical canvas size `{ width, height }` |
-| `SafeArea` | JS -> Rust | safe-area insets + screen size + menu button |
-| `Theme` | both | `"dark"` / `"light"` |
-| `SetTheme(value)` | Rust -> JS | manual appearance override |
-| `AdStatus` | JS -> Rust | `idle` / `loading` / `ended` / `skipped` / `error` / `unavailable` |
-| `ShowAd(kind)` | Rust -> JS | start a rewarded video; `false` means `error` / `unavailable` |
-| `AdMock` | JS -> Rust | whether the last `ShowAd` used the local mock |
+| `Version` | JS -> Rust | adapter version (`"0.3.0"`) |
+| `Layout` / `Canvas` / `SafeArea` | JS -> Rust | canvas, safe area, screen, seq (flat copies kept for 0.2) |
+| `ViewportSeq` | JS -> Rust | bumps on canvas/safe-area changes |
+| `Theme` / `ThemeManual` / `ThemeSource` | JS -> Rust | appearance state |
+| `SetTheme(value)` / `FollowTheme()` | Rust -> JS | manual override / resume system |
+| `RequestAd(kind)` | Rust -> JS | returns a ticket (`0` = busy/failed) |
+| `ShowAd(kind)` | Rust -> JS | `RequestAd(kind) > 0` compatibility wrapper |
+| `AdTicket` / `AdResult` | JS -> Rust | correlate a terminal result with its request |
+| `AdStatus` / `AdReason` / `AdLastError` | JS -> Rust | state machine detail |
+| `AppState` / `AppStateSeq` | JS -> Rust | foreground/background |
+| `AdMock` | JS -> Rust | whether *this* ad used the local mock |
 
 If you change `globalPrefix` in `game.js`, update the Rust host's constant
 names too.

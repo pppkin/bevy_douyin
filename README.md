@@ -37,9 +37,9 @@ git submodule update --init addons/bevy-douyin
 Pinning a release tag is recommended for reproducible builds:
 
 ```bash
-git -C addons/bevy-douyin checkout adapter-v0.2.2
+git -C addons/bevy-douyin checkout adapter-v0.3.0
 git add addons/bevy-douyin
-git commit -m "chore: pin bevy-douyin adapter v0.2.2"
+git commit -m "chore: pin bevy-douyin adapter v0.3.0"
 ```
 
 ### 2. Copy the package template
@@ -66,7 +66,7 @@ platforms/douyin/
 
 The adapter owns every `tt.*` call and publishes the host facts below as
 globals; the game's `Host` module only reads those globals (and calls
-`SetTheme` / `ShowAd`). On the Rust side, read them through
+`SetTheme` / `FollowTheme` / `RequestAd`). On the Rust side, read them through
 `js_sys::global()` + `Reflect::get("window")`, not `eval` / `GameGlobal` —
 see [`docs/host-contract.md`](docs/host-contract.md).
 
@@ -115,22 +115,30 @@ under `globalPrefix` (default `__bevy_douyin_`):
 
 | Name | Direction | Meaning |
 | --- | --- | --- |
-| `<prefix>Canvas` | JS → Rust | logical canvas size `{ width, height }` |
-| `<prefix>SafeArea` | JS → Rust | insets, screen size, menu button |
-| `<prefix>Theme` | both | `"dark"` / `"light"` |
-| `<prefix>SetTheme` | Rust → JS | manual appearance override |
-| `<prefix>AdStatus` | JS → Rust | rewarded-video state |
-| `<prefix>ShowAd` | Rust → JS | start a rewarded video; `false` when unavailable |
-| `<prefix>AdMock` | JS → Rust | whether the last `ShowAd` used the local mock |
+| `<prefix>Version` | JS → Rust | adapter version, e.g. `"0.3.0"` |
+| `<prefix>Config` | JS → Rust | normalised startup config |
+| `<prefix>Layout` | JS → Rust | `{canvas, safeArea, screen, devicePixelRatio, seq}` |
+| `<prefix>Canvas` / `<prefix>SafeArea` | JS → Rust | flat 0.2-compatible copies |
+| `<prefix>ViewportSeq` | JS → Rust | increments on every canvas/safe-area change |
+| `<prefix>Theme` / `ThemeManual` / `ThemeSource` | JS → Rust | appearance state |
+| `<prefix>SetTheme` / `FollowTheme` | Rust → JS | manual override / resume system |
+| `<prefix>RequestAd(kind)` | Rust → JS | returns a ticket (`0` = busy/failed) |
+| `<prefix>ShowAd(kind)` | Rust → JS | `RequestAd(kind) > 0` compatibility wrapper |
+| `<prefix>AdTicket` / `AdResult` | JS → Rust | correlate the result with the request |
+| `<prefix>AdStatus` / `AdReason` / `AdLastError` | JS → Rust | state machine detail |
+| `<prefix>AppState` / `AppStateSeq` | JS → Rust | foreground/background |
+| `<prefix>AdMock` | JS → Rust | whether *this* ad used the mock |
 
 If a game overrides `globalPrefix`, its Rust host constants must match.
 
-With no `adUnitId`, `ShowAd` runs a local mock (`loading → ended`, 600ms by
+With no `adUnitId`, `RequestAd` runs a local mock (`loading → ended`, 600ms by
 default) so the simulator exercises the same state machine as a real device.
 Configure it with `mockAds`, `mockAdResult` (`ended` / `skipped` / `error`)
-and `mockAdDelay`. Set `mockAds: false` to get `unavailable` instead. See
-[`docs/host-contract.md`](docs/host-contract.md#6-激励视频含本地-mock) for the
-full ad contract, including the timeout the caller must implement.
+and `mockAdDelay`. Set `mockAds: false` to get `unavailable` instead. The
+adapter also enforces `adTimeoutMs` (30s) for real ads and publishes the
+terminal state in `AdResult`; see
+[`docs/host-contract.md`](docs/host-contract.md#7-激励视频含本地-mock) for the
+full ad contract.
 
 ## Documentation
 
