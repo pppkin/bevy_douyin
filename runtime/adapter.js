@@ -20,7 +20,7 @@
     ? GameGlobal
     : (typeof globalThis !== 'undefined' ? globalThis : this);
 
-  var VERSION = '0.3.0';
+  var VERSION = '0.4.0';
   var DEFAULT_GLOBAL_PREFIX = '__bevy_douyin_';
   var installed = null;
 
@@ -745,6 +745,13 @@
     var nativeCaf = typeof G.cancelAnimationFrame === 'function'
       ? G.cancelAnimationFrame.bind(G) : null;
     var nativeFetch = typeof G.fetch === 'function' ? G.fetch.bind(G) : null;
+    // AudioContext is looked up on the *global* object by cpal (Bevy's audio
+    // backend), not on the window shim, so keep a copy before `put()` shadows it.
+    var nativeAudioContext = typeof G.AudioContext === 'function'
+      ? G.AudioContext
+      : (typeof globalThis !== 'undefined' && typeof globalThis.AudioContext === 'function'
+        ? globalThis.AudioContext
+        : null);
     var nativeSetInterval = typeof G.setInterval === 'function' ? G.setInterval.bind(G) : null;
     var nativeSetTimeout = typeof G.setTimeout === 'function' ? G.setTimeout.bind(G) : null;
     var nativeClearTimeout = typeof G.clearTimeout === 'function' ? G.clearTimeout.bind(G) : null;
@@ -1235,7 +1242,13 @@
       for (var i = 0; i < list.length; i++) emitPointer(type, list[i], buttons);
     }
     if (cfg.touch !== false && typeof tt.onTouchStart === 'function') {
-      tt.onTouchStart(function (res) { eachChanged(res, 'pointerdown', 1); });
+      tt.onTouchStart(function (res) {
+        // iOS may create the context suspended until a real user gesture.
+        if (audioContext && audioContext.state !== 'running' && typeof audioContext.resume === 'function') {
+          try { audioContext.resume(); } catch (e) { log('audio: resume failed: ' + e); }
+        }
+        eachChanged(res, 'pointerdown', 1);
+      });
       tt.onTouchMove(function (res) { eachChanged(res, 'pointermove', 1); });
       tt.onTouchEnd(function (res) { eachChanged(res, 'pointerup', 0); });
       if (typeof tt.onTouchCancel === 'function') {
@@ -1257,6 +1270,14 @@
         appState = nextState;
         publishAppState();
         log('lifecycle: ' + appState + ' seq=' + appStateSeq);
+      }
+      if (audioContext && typeof audioContext.resume === 'function' && typeof audioContext.suspend === 'function') {
+        try {
+          if (visible) audioContext.resume();
+          else audioContext.suspend();
+        } catch (e) {
+          log('audio: lifecycle ' + nextState + ' failed: ' + e);
+        }
       }
       doc.hidden = !visible;
       doc.visibilityState = visible ? 'visible' : 'hidden';
@@ -1410,6 +1431,47 @@
       if (nativeFetch) return nativeFetch(p);
       return p;
     });
+
+    // ── audio ────────────────────────────────────────────────────────────────
+    // Bevy's wasm audio path is `bevy_audio -> rodio -> cpal -> WebAudio`.
+    // cpal only needs a W3C-shaped AudioContext; Douyin exposes one through
+    // `tt.getAudioContext()` (base library 1.34.0+). The simulator also has a
+    // native AudioContext, which we keep as a fallback.
+    var audioContextCreated = false;
+    var audioContext = null;
+    function acquireAudioContext(opts) {
+      var ctx = null;
+      if (typeof tt !== 'undefined' && typeof tt.getAudioContext === 'function') {
+        try { ctx = tt.getAudioContext(); } catch (e) { log('audio: tt.getAudioContext failed: ' + e); }
+      }
+      if (!ctx && nativeAudioContext) {
+        ctx = new nativeAudioContext(opts);
+      }
+      if (!ctx) throw new Error('AudioContext is not available');
+      // Douyin's destination has maxChannelCount but no setChannelCount.
+      // cpal calls it when the requested channel count fits; a no-op is fine
+      // because the destination already exposes two channels.
+      try {
+        var dest = ctx.destination;
+        if (dest && typeof dest.setChannelCount !== 'function') {
+          dest.setChannelCount = function () {};
+        }
+      } catch (e) {
+        log('audio: cannot patch destination: ' + e);
+      }
+      audioContext = ctx;
+      if (!audioContextCreated) {
+        audioContextCreated = true;
+        log('audio: context ready sampleRate=' + ctx.sampleRate + ' state=' + ctx.state);
+      }
+      return ctx;
+    }
+    function AudioContextShim(opts) {
+      return acquireAudioContext(opts);
+    }
+    if (nativeAudioContext) AudioContextShim.prototype = nativeAudioContext.prototype;
+    put('AudioContext', AudioContextShim);
+    put('webkitAudioContext', AudioContextShim);
 
     put('Window', Window);
     put('EventTarget', makeClass('EventTarget', function (o) {

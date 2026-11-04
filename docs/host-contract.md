@@ -1,10 +1,10 @@
-# 宿主契约（adapter v0.3.0）
+# 宿主契约（adapter v0.4.0）
 
 这份文档描述 `runtime/adapter.js` 向游戏暴露的**稳定接口**。游戏侧（通常是
 `Host` / `HostEnv` 之类的小模块）只依赖这里列出的全局变量、单位约定和状态机，
 不直接调用 `tt.*`。
 
-> 适用版本：`v0.3.0`。升级适配层后，先对照本文末尾的「升级检查清单」回归。
+> 适用版本：`v0.4.0`。升级适配层后，先对照本文末尾的「升级检查清单」回归。
 
 ## 1. 启动顺序
 
@@ -67,7 +67,7 @@ H = round(max(designH, designW * screenH / screenW))
 
 | 名称 | 类型 | 方向 | 说明 |
 | --- | --- | --- | --- |
-| `Version` | `string` | JS → Rust | 适配层版本，例如 `"0.3.0"` |
+| `Version` | `string` | JS → Rust | 适配层版本，例如 `"0.4.0"` |
 | `Config` | 对象 | JS → Rust | 归一化后的启动配置，见下表 |
 | `Layout` | 对象 | JS → Rust | `{canvas, safeArea, screen, devicePixelRatio, seq}` |
 | `Canvas` | `{width,height}` | JS → Rust | 逻辑画布尺寸（canvas px），`Layout.canvas` 的扁平副本 |
@@ -278,17 +278,82 @@ localStorage.length / key(i)
   `Time<Virtual>`，在 `AppState=="background"` 时暂停、回前台再恢复，或至少对
   `dt` 做上限（例如 0.1s）；纯表现效果可以用 `Time<Real>`。
 
-## 10. 不支持 / 已知限制
+## 10. 音频（0.4 新增）
+
+适配层安装了一个全局 `AudioContext` 构造器，Bevy 的
+`bevy_audio → rodio → cpal` 会直接走 WebAudio 后端：
+
+```text
+AudioPlayer
+  └─ rodio 解码 / 混音
+       └─ cpal webaudio host
+            └─ AudioContext.createBufferSource → destination
+```
+
+### 构造顺序
+
+- 优先 `tt.getAudioContext()`（基础库 1.34.0+，返回 W3C 风格的 AudioContext）；
+- 没有该 API 时回退到原生 `AudioContext`（模拟器可用）；
+- 两者都没有时，构造器抛出 `AudioContext is not available`；
+- 首次创建会打印一行 `audio: context ready sampleRate=44100 state=running`。
+
+同一个上下文会被复用；适配层只创建一次。
+
+### 兼容补丁
+
+- 抖音的 `destination` 没有 `setChannelCount`，cpal 在声道数匹配时会调用它；
+  适配层补了一个空实现。
+- 缓冲区、`currentTime`、`createBufferSource`、`buffer` 属性都使用标准
+  WebAudio 语义，不需要额外适配。
+- 采样率默认跟随音频设备（模拟器为 44100Hz）。游戏侧不要假设固定采样率。
+
+### 前后台与自动播放
+
+- `tt.onHide` 时 `suspend()`，`tt.onShow` 时 `resume()`；
+- 第一次 `tt.onTouchStart` 也会尝试 `resume()`，用于 iOS 的“必须用户手势才能
+  出声”限制；
+- 如果上下文仍处于 `suspended`，先让玩家点一下屏幕，再播放第一段声音。
+
+### 资源怎么进包
+
+抖音小游戏**不能**通过 `fetch` 或 `FileSystemManager` 读取包内文件
+（`readFileSync('game.json')` 会报 `no such file or directory`）。因此：
+
+- 小音效用 `include_bytes!` 编进 wasm，再 `Assets<AudioSource>::add`；
+- 长音频/背景音乐可以放远程 CDN，但需要配置抖音的合法域名，并且要自己处理
+  网络 `fetch`（适配层的 `fetch` 只是转发原生实现）；
+- `AssetServer.load("audio/x.wav")` 在真机上通常拿不到包内文件，不建议依赖。
+
+```rust
+let bytes = include_bytes!("../assets/audio/hit.wav");
+let sound = assets.add(AudioSource {
+    bytes: Arc::from(&bytes[..]),
+});
+commands.spawn((
+    AudioPlayer(sound),
+    PlaybackSettings::DESPAWN,
+));
+```
+
+### 已知限制
+
+- 真机音频只做了 API 级验证，尚未在所有机型上试听；iOS 静音键、蓝牙耳机、
+  低端 Android 的采样率差异都可能导致“没有声音”；
+- 不支持后台播放；切后台会 `suspend()`；
+- 没有 3D 空间音频的额外保证，Bevy 的 `SpatialListener` 仍依赖 WebAudio 实现；
+- 解码格式取决于 Cargo feature（`wav` / `vorbis` / `mp3`），没开就会在加载时
+  报错。
+
+## 11. 不支持 / 已知限制
 
 - 只支持 WebGL2，没有 WebGL1 / WebGPU 回退；
-- 没有音频 shim（`AudioContext` 等），Bevy audio 需要自行补；
 - 没有多线程，Bevy 任务池走单线程；
 - 画布 resize 会重建 backing store，但游戏需要自己重建相机/布局；
 - adapter 是进程级单例，一个 JS 上下文只能跑一个 Bevy App；
-- `fetch` 对字符串直接返回包内路径，复杂 HTTP/缓存逻辑需要自己补；
+- `fetch` 只转发原生实现；包内文件无法读取，资源要内嵌或走网络；
 - wasm-bindgen 版本敏感：`tools/patch_glue.py` 针对 **0.2.129**。
 
-## 11. 升级检查清单
+## 12. 升级检查清单
 
 升级 adapter 后至少回归：
 
@@ -301,4 +366,5 @@ localStorage.length / key(i)
 - [ ] 无广告位时 mock 能走完 `loading → ended`，且 ticket 对得上；
 - [ ] 有广告位时 `ended` / `skipped` / `error` / 超时四条路径都可复现；
 - [ ] 存档写入后重启仍能读回，`clear()` 不影响其他命名空间；
-- [ ] 切后台再回来，画面恢复且没有巨大 `dt` 跳变。
+- [ ] 切后台再回来，画面恢复且没有巨大 `dt` 跳变；
+- [ ] 音频：`audio: context ready` 出现，第一次触摸后能出声，切后台再回来不报错。

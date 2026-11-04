@@ -124,9 +124,10 @@ unknown import kind 0x7f @+13820
 
 ### 资源
 
-Bevy 默认从 `assets/` 加载资源。`build.sh` 会把 `--assets` 指定的目录复制到输出包
-（默认 `douyin/assets/`），adapter 的 `fetch` 对字符串直接返回包内路径，所以
-`AssetServer::load("sprite.png")` 在模拟器里可用。资源同样受主包 4 MB 限制。
+Bevy 默认从 `assets/` 加载资源，`build.sh` 会把 `--assets` 指定的目录复制到输出包
+（默认 `douyin/assets/`）。但抖音运行时读不到包内文件：`fetch` 没有可用的
+Response，`FileSystemManager.readFileSync('game.json')` 也会报不存在。小资源请用
+`include_bytes!` 编进 wasm；网络资源需要配置合法域名。主包仍有 4 MB 限制。
 
 ### 体积
 
@@ -211,6 +212,7 @@ if (typeof GameGlobal !== 'undefined') GameGlobal.__probe = 1;
 - `AdapterInfo` 为 ANGLE Metal / Apple M1，`backend: "Gl"`；
 - 2D Pong 持续渲染；
 - `miniapp-swipe` 触摸能移动球拍；
+- `bevy_audio` 通过 cpal 的 WebAudio 后端建立 44.1kHz 输出，控制台无解码错误；
 - 控制台无 panic。
 
 真机（iPhone 16 / iOS 27.2 / 抖音 4.36.0）：
@@ -225,12 +227,12 @@ if (typeof GameGlobal !== 'undefined') GameGlobal.__probe = 1;
 - **真机只验证了 iOS**（iPhone 16 / iOS 27.2 / 抖音 4.36.0）。低端 Android 的 WebGL2 / ANGLE 差异未测。
 - **只支持 WebGL2**。没有 WebGL1 fallback；不支持 WebGPU。
 - **Downlevel 限制**：模拟器报告 `max_storage_buffers_per_shader_stage = 0`，Bevy 会关闭 GPU preprocessing、OIT、部分后处理。重度 3D 项目需要重新评估。
-- **无音频验证**。Bevy audio 需要额外 shim（`AudioContext` 等），当前未接。
+- **音频真机未试听**。0.4 已提供 `AudioContext` shim，模拟器验证了 cpal 调度，但静音键、耳机和低端 Android 仍需真机确认。
 - **无多线程**。抖音小游戏 wasm 不支持 threads；Bevy 任务池会走单线程路径。
-- **DPR 固定**。旋转/窗口变化不会重新计算 backing store；需要时监听 `tt.onWindowResize` 后重建 canvas/context。
+- **布局需要游戏自己跟**。0.3 起适配层会刷新 backing store 并递增 `ViewportSeq`，但游戏仍要重建相机/布局。
 - **单实例**。adapter 是进程级单例，一个 JS 上下文只能跑一个 Bevy App；多开需要改成实例化。
 - **输入**：触摸映射为 pointer；鼠标/键盘在模拟器可用，但真机以触摸为准。手柄 API 在非 secure context 下不可用。
-- **资源加载**：`fetch` 对字符串直接返回路径，适合 `AssetServer` 读取包内资源；复杂 HTTP/缓存逻辑需要自己补。
+- **资源加载**：抖音包内文件不能用 `fetch` 或 `FileSystemManager` 读取；小资源用 `include_bytes!` 内嵌，网络资源需配置合法域名。
 - **wasm-bindgen 版本敏感**。`patch_glue.py` 针对 0.2.129；升级后必须重新验证。
 
 ## 移植到别的 wasm 引擎的方法论

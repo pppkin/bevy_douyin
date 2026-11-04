@@ -89,6 +89,9 @@ function createHost(options) {
   if (typeof opts.adFactory === 'function') {
     tt.createRewardedVideoAd = opts.adFactory;
   }
+  if (opts.audioContext) {
+    tt.getAudioContext = function () { return opts.audioContext; };
+  }
 
   const GameGlobal = {
     setTimeout: setTimeout,
@@ -146,8 +149,8 @@ function createHost(options) {
 
 test('publishes the adapter version and static config', function () {
   const host = createHost();
-  assert.equal(host.adapter.version, '0.3.0');
-  assert.equal(host.pub('Version'), '0.3.0');
+  assert.equal(host.adapter.version, '0.4.0');
+  assert.equal(host.pub('Version'), '0.4.0');
   const cfg = host.pub('Config');
   assert.equal(cfg.name, 'test');
   assert.equal(cfg.designWidth, 720);
@@ -428,4 +431,51 @@ test('storage clear without a prefix leaves foreign keys alone', function () {
   assert.equal(host.storage.foreign, 'keep');
   assert.equal(host.storage['game.a'], '1');
   assert.equal(host.storage['game.b'], undefined);
+});
+
+test('audio: exposes a WebAudio-compatible AudioContext backed by tt', function () {
+  const calls = { resume: 0, suspend: 0 };
+  const ctx = {
+    sampleRate: 44100,
+    state: 'suspended',
+    destination: { maxChannelCount: 2, channelCount: 2 },
+    resume: function () {
+      calls.resume += 1;
+      ctx.state = 'running';
+      return Promise.resolve();
+    },
+    suspend: function () {
+      calls.suspend += 1;
+      ctx.state = 'suspended';
+      return Promise.resolve();
+    }
+  };
+  const host = createHost({ audioContext: ctx });
+  const win = host.env.window;
+
+  assert.equal(typeof win.AudioContext, 'function');
+  const made = new win.AudioContext({ sampleRate: 44100 });
+  assert.equal(made, ctx);
+  // cpal calls destination.setChannelCount(); Douyin does not implement it.
+  assert.equal(typeof ctx.destination.setChannelCount, 'function');
+  ctx.destination.setChannelCount(2);
+  assert.equal(ctx.destination.channelCount, 2);
+
+  host.listeners.hide();
+  assert.equal(calls.suspend, 1);
+  assert.equal(ctx.state, 'suspended');
+
+  host.listeners.touchstart({ changedTouches: [{ clientX: 10, clientY: 10 }] });
+  assert.equal(calls.resume, 1);
+  assert.equal(ctx.state, 'running');
+
+  host.listeners.hide();
+  host.listeners.show();
+  assert.equal(calls.resume, 2);
+});
+
+test('audio: install does not break when the host has no AudioContext', function () {
+  const host = createHost();
+  assert.equal(typeof host.env.window.AudioContext, 'function');
+  assert.throws(function () { return new host.env.window.AudioContext(); }, /not available/);
 });

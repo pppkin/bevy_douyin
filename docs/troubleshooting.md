@@ -126,6 +126,29 @@ grep -A1 'name = "wasm-bindgen"' Cargo.lock
 cargo install wasm-bindgen-cli --version 0.2.129 --force
 ```
 
+## 没有声音 / `No audio device found`
+
+先看控制台有没有这一行：
+
+```text
+[bevy-douyin:my_game] audio: context ready sampleRate=44100 state=running
+```
+
+- **没有这行**：适配层版本低于 0.4，或 `tt.getAudioContext` 不可用（基础库
+  低于 1.34.0）。先升级适配层；模拟器会回退到原生 `AudioContext`。
+- **有这行但还是 `No audio device found`**：cpal 没拿到上下文。检查是否在
+  `adapter.install()` 之前就初始化了 Bevy，或页面里另一个库覆盖了
+  `AudioContext`。
+- **`state=suspended`**：iOS 要求用户手势后才能出声。让玩家点一下屏幕；
+  适配层会在第一次 `touchstart` 时 `resume()`。仍不行时检查系统静音键和音量。
+- **有声音对象但听不到**：确认 Cargo 开了对应的解码 feature（`wav` /
+  `vorbis` / `mp3`），WAV 必须是常见 PCM 头；`include_bytes!` 的路径要从
+  源文件算起。
+- **切后台回来没声音**：`onHide` 会 `suspend()`，`onShow` 会 `resume()`；
+  如果宿主没有触发 `onShow`，点一下屏幕也能恢复。
+- **真机与模拟器不同**：模拟器走 macOS 音频设备，真机走抖音的 WebAudio。
+  真机上还要确认没有占用音频焦点、没有静音。
+
 ## 包体积超过 4 MB
 
 - 确认用的是 `--release`；

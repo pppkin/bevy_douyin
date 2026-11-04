@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.4.0
+
+### Added
+
+- WebAudio output for `bevy_audio`. The adapter installs a global
+  `AudioContext` backed by `tt.getAudioContext()` (base library 1.34.0+), with a
+  native `AudioContext` fallback in the simulator.
+- `destination.setChannelCount` polyfill for Douyin's AudioContext.
+- Automatic audio lifecycle: touch start resumes a suspended context, `onShow`
+  resumes and `onHide` suspends it.
+- Two new adapter tests (21 total) covering the shim, the channel-count
+  polyfill, touch unlock and foreground/background transitions.
+
+### Notes
+
+- Small sounds should be embedded with `include_bytes!`: Douyin package files
+  cannot be read through `fetch` or `FileSystemManager`.
+- Device audio is API-verified only; test mute switches and headphones on real
+  hardware.
+
 ## 0.3.0
 
 ### Added

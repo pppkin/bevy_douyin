@@ -64,7 +64,7 @@ Rust 入口留在游戏仓库里，因为每个游戏的 host 实现不同。适
 
 | 全局 | 方向 | 说明 |
 | --- | --- | --- |
-| `Version` | JS → Rust | 适配层版本，如 `"0.3.0"` |
+| `Version` | JS → Rust | 适配层版本，如 `"0.4.0"` |
 | `Layout` / `Canvas` / `SafeArea` | JS → Rust | 画布、安全区、屏幕和序号 |
 | `ViewportSeq` | JS → Rust | 尺寸变化时递增 |
 | `Theme` / `ThemeManual` / `ThemeSource` | JS → Rust | 主题状态 |
@@ -78,3 +78,9 @@ Rust 入口留在游戏仓库里，因为每个游戏的 host 实现不同。适
 
 读全局时使用 `js_sys::global()` 加 `Reflect::get("window")`。不要用 `eval`，也不要
 依赖 `GameGlobal`。完整字段见 [`../docs/host-contract.md`](../docs/host-contract.md)。
+
+### 音频
+
+适配层在全局安装了 `AudioContext`，Bevy 打开 `bevy_audio` + `wav` feature 后
+可以直接播放。抖音包内文件不能用 `fetch` 读取，小音效用 `include_bytes!`
+编进 wasm，再通过 `Assets<AudioSource>` 交给 `AudioPlayer`。

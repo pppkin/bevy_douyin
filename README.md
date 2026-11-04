@@ -41,9 +41,9 @@ git submodule update --init addons/bevy-douyin
 固定到发布 tag，构建结果才可复现：
 
 ```bash
-git -C addons/bevy-douyin checkout adapter-v0.3.0
+git -C addons/bevy-douyin checkout adapter-v0.4.0
 git add addons/bevy-douyin
-git commit -m "chore: pin bevy-douyin adapter v0.3.0"
+git commit -m "chore: pin bevy-douyin adapter v0.4.0"
 ```
 
 ### 3. 复制小游戏工程模板
@@ -136,6 +136,36 @@ let ticket = request
     .unwrap_or(0.0);
 ```
 
+播放音频前先在 `Cargo.toml` 打开 Bevy 的音频 feature（`wav` 可按需换成
+`vorbis` / `mp3`）：
+
+```toml
+bevy = { version = "0.20", default-features = false, features = [
+  # ...其他 feature...
+  "bevy_audio",
+  "wav",
+] }
+```
+
+然后照常使用 `AudioPlayer`。抖音包内的文件不能通过 `fetch` 读取，小音效建议
+直接编进 wasm：
+
+```rust
+use bevy::audio::{AudioPlayer, AudioSource, PlaybackSettings};
+use std::sync::Arc;
+
+fn setup(mut commands: Commands, mut assets: ResMut<Assets<AudioSource>>) {
+    let bytes = include_bytes!("../assets/audio/hit.wav");
+    let sound = assets.add(AudioSource {
+        bytes: Arc::from(&bytes[..]),
+    });
+    commands.spawn((
+        AudioPlayer(sound),
+        PlaybackSettings::DESPAWN,
+    ));
+}
+```
+
 完整的 `Host`、布局换算和广告状态机，见示例仓库的
 `platforms/douyin/src/host.rs` 与 `game.rs`。
 
@@ -147,7 +177,8 @@ let ticket = request
 - **可复制的工程模板**：`game.js`、`game.json`、`project.config.json` 直接拿走。
 - **稳定的宿主契约**：画布、安全区、主题、广告、前后台、存储都有明确全局和版本号。
 - **本地广告 mock**：没有广告位也能跑完整的 `loading → ended` 流程。
-- **契约测试**：用 Node 的 `vm` 加载真实 `adapter.js`，覆盖广告、主题、视口和存储。
+- **原生音频**：安装 `AudioContext` shim，`bevy_audio → rodio → cpal → WebAudio` 可以直接播放；前后台自动 suspend / resume。
+- **契约测试**：用 Node 的 `vm` 加载真实 `adapter.js`，覆盖音频、广告、主题、视口和存储。
 
 ## 配置说明
 
@@ -249,11 +280,11 @@ feature 组合，直接用它。
 
 ## 贡献指南
 
-1. 修改 `runtime/adapter.js` 后运行 `npm test`，确保 19 个契约测试全部通过。
+1. 修改 `runtime/adapter.js` 后运行 `npm test`，确保 21 个契约测试全部通过。
 2. 新增行为时，在 `tests/adapter.test.js` 加一条对应测试。
 3. 面向游戏的接口发生变化时，同步更新 `docs/host-contract.md`、`README.md` 和 `CHANGELOG.md`。
 4. 运行时保持 ES5 写法，不要引入构建期转译。
-5. 发布前打 tag，例如 `adapter-v0.3.0`，并推送 tag。
+5. 发布前打 tag，例如 `adapter-v0.4.0`，并推送 tag。
 
 ## 许可证
 
