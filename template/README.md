@@ -26,7 +26,10 @@ The files are:
   (`target/wasm32-unknown-unknown/release/<stem>.wasm`); it does not rename
   the JavaScript output.
 - `AD_UNIT_ID` is your Douyin rewarded-video ad slot. Leave it empty to use the
-  adapter's local mock flow.
+  adapter's local mock flow: `ShowAd` returns `true`, `AdStatus` goes
+  `loading → ended` after `mockAdDelay` (600ms). Use `mockAdResult`
+  (`ended` / `skipped` / `error`) to test the failure paths, or
+  `mockAds: false` to make an empty slot report `unavailable`.
 - `canvas` must match the selector the runtime should create (`#game-canvas`
   in this template); `width` / `height` are the logical resolution.
 - `globalPrefix` defaults to `__bevy_douyin_`. If you change it, update the
@@ -51,7 +54,8 @@ the game's own host contract. The adapter exposes these globals under
 | `Theme` | both | `"dark"` / `"light"` |
 | `SetTheme(value)` | Rust -> JS | manual appearance override |
 | `AdStatus` | JS -> Rust | `idle` / `loading` / `ended` / `skipped` / `error` / `unavailable` |
-| `ShowAd(kind)` | Rust -> JS | start a rewarded video; `false` means use the game mock |
+| `ShowAd(kind)` | Rust -> JS | start a rewarded video; `false` means `error` / `unavailable` |
+| `AdMock` | JS -> Rust | whether the last `ShowAd` used the local mock |
 
 If you change `globalPrefix` in `game.js`, update the Rust host's constant
 names too.

@@ -37,9 +37,9 @@ git submodule update --init addons/bevy-douyin
 Pinning a release tag is recommended for reproducible builds:
 
 ```bash
-git -C addons/bevy-douyin checkout adapter-v0.2.1
+git -C addons/bevy-douyin checkout adapter-v0.2.2
 git add addons/bevy-douyin
-git commit -m "chore: pin bevy-douyin adapter v0.2.1"
+git commit -m "chore: pin bevy-douyin adapter v0.2.2"
 ```
 
 ### 2. Copy the package template
@@ -64,8 +64,11 @@ platforms/douyin/
   package/          game.js, game.json, project.config.json, icon.png
 ```
 
-The game's `Host` implementation owns the `tt.*` SDK calls; the adapter only
-bridges them through the globals listed below.
+The adapter owns every `tt.*` call and publishes the host facts below as
+globals; the game's `Host` module only reads those globals (and calls
+`SetTheme` / `ShowAd`). On the Rust side, read them through
+`js_sys::global()` + `Reflect::get("window")`, not `eval` / `GameGlobal` —
+see [`docs/host-contract.md`](docs/host-contract.md).
 
 ### 4. Build
 
@@ -117,9 +120,27 @@ under `globalPrefix` (default `__bevy_douyin_`):
 | `<prefix>Theme` | both | `"dark"` / `"light"` |
 | `<prefix>SetTheme` | Rust → JS | manual appearance override |
 | `<prefix>AdStatus` | JS → Rust | rewarded-video state |
-| `<prefix>ShowAd` | Rust → JS | start a rewarded video |
+| `<prefix>ShowAd` | Rust → JS | start a rewarded video; `false` when unavailable |
+| `<prefix>AdMock` | JS → Rust | whether the last `ShowAd` used the local mock |
 
 If a game overrides `globalPrefix`, its Rust host constants must match.
+
+With no `adUnitId`, `ShowAd` runs a local mock (`loading → ended`, 600ms by
+default) so the simulator exercises the same state machine as a real device.
+Configure it with `mockAds`, `mockAdResult` (`ended` / `skipped` / `error`)
+and `mockAdDelay`. Set `mockAds: false` to get `unavailable` instead. See
+[`docs/host-contract.md`](docs/host-contract.md#6-激励视频含本地-mock) for the
+full ad contract, including the timeout the caller must implement.
+
+## Documentation
+
+- [`docs/host-contract.md`](docs/host-contract.md) — globals, units, pointer
+  pipeline, theme, ads, storage, lifecycle, upgrade checklist
+- [`docs/how-it-works.md`](docs/how-it-works.md) — the shim layers and why
+  each one exists
+- [`docs/troubleshooting.md`](docs/troubleshooting.md) — known errors and
+  device-only failures
+- [`docs/wasm-size.md`](docs/wasm-size.md) — size budget and build tuning
 
 ## Requirements
 

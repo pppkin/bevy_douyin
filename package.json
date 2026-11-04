@@ -1,0 +1,8 @@
+{
+  "name": "bevy-douyin-adapter-tests",
+  "private": true,
+  "description": "Node-only contract tests for runtime/adapter.js",
+  "scripts": {
+    "test": "node --test tests/"
+  }
+}

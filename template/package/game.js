@@ -2,7 +2,10 @@
 // and replace the placeholders (name / wasm / glue / AD_UNIT_ID).
 var runtime = require('./runtime/bootstrap.js');
 
-var AD_UNIT_ID = ''; // set to your rewarded-video ad unit, or leave empty for the mock flow
+// Set to your rewarded-video ad unit. When empty the adapter runs a local
+// mock: AdStatus goes loading -> ended (600ms), so the simulator can exercise
+// the reward flow without a real ad slot.
+var AD_UNIT_ID = '';
 
 runtime.start({
   name: 'my-game',

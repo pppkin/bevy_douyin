@@ -20,7 +20,7 @@
     ? GameGlobal
     : (typeof globalThis !== 'undefined' ? globalThis : this);
 
-  var VERSION = '0.2.1';
+  var VERSION = '0.2.2';
   var DEFAULT_GLOBAL_PREFIX = '__bevy_douyin_';
   var installed = null;
 
@@ -672,6 +672,7 @@
       ? G.cancelAnimationFrame.bind(G) : null;
     var nativeFetch = typeof G.fetch === 'function' ? G.fetch.bind(G) : null;
     var nativeSetInterval = typeof G.setInterval === 'function' ? G.setInterval.bind(G) : null;
+    var nativeSetTimeout = typeof G.setTimeout === 'function' ? G.setTimeout.bind(G) : null;
     // Frame instrumentation: a black screen with no logs is otherwise
     // indistinguishable between "no frame ran" and "frames run but draw
     // nothing".  Every callback is wrapped so that an exception inside the
@@ -841,9 +842,12 @@
     // ── rewarded video ads ────────────────────────────────────────────────
     // A single rewarded-video unit can serve all three reward placements.
     // `adUnitIds` is optional; use it later if each placement gets its own
-    // traffic-owner ad slot. An empty configuration deliberately falls back
-    // to the local mock flow (useful in the simulator).
+    // traffic-owner ad slot. With no ad unit configured (or no
+    // tt.createRewardedVideoAd in the host) the adapter runs a local mock so
+    // the simulator exercises the same state machine as a real device. Set
+    // `mockAds: false` to get `unavailable` instead.
     var rewardedAds = Object.create(null);
+    var MOCK_AD_RESULTS = { ended: true, skipped: true, error: true };
     function adUnitFor(kind) {
       if (cfg.adUnitIds && cfg.adUnitIds[kind]) return String(cfg.adUnitIds[kind]);
       return cfg.adUnitId ? String(cfg.adUnitId) : '';
@@ -852,6 +856,24 @@
       publish('AdStatus', status);
     }
     publishAdStatus('idle');
+    publish('AdMock', false);
+
+    function showMockAd(kind) {
+      publish('AdMock', true);
+      var result = String(cfg.mockAdResult || 'ended').toLowerCase();
+      if (!MOCK_AD_RESULTS[result]) result = 'ended';
+      var delay = Number(cfg.mockAdDelay);
+      if (!(delay >= 0)) delay = 600;
+      publishAdStatus('loading');
+      log('ad mock kind=' + kind + ' result=' + result + ' delay=' + delay + 'ms');
+      var finish = function () {
+        publishAdStatus(result);
+        log('ad mock finished: ' + result);
+      };
+      if (nativeSetTimeout) nativeSetTimeout(finish, delay);
+      else finish();
+      return true;
+    }
     function getRewardedVideo(kind) {
       var unitId = adUnitFor(kind);
       if (!unitId || typeof tt === 'undefined' || typeof tt.createRewardedVideoAd !== 'function') {
@@ -878,11 +900,14 @@
       return ad;
     }
     publish('ShowAd', function (kind) {
+      var unitId = adUnitFor(kind);
       var ad = getRewardedVideo(kind);
       if (!ad) {
-        publishAdStatus('unavailable');
+        if (!unitId && cfg.mockAds !== false) return showMockAd(kind);
+        publishAdStatus(unitId ? 'error' : 'unavailable');
         return false;
       }
+      publish('AdMock', false);
       publishAdStatus('loading');
       log('ad show kind=' + kind);
       var shown;
